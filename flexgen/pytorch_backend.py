@@ -260,7 +260,11 @@ class TorchDevice:
         token_embed = F.embedding(token_ids, w_token.data, pad_token_id)
 
         # pos embedding
-        positions = torch.cumsum(mask, dim=1).int() * mask + 1
+        # @GOROman addressed (20230306)
+        if self.device_type == DeviceType.MPS:
+            positions = torch.cumsum(mask.to('cpu'), dim=1).to('mps:0').int() * mask + 1
+        else:
+            positions = torch.cumsum(mask, dim=1).int() * mask + 1
 
         # cut positions if `past_key_values_length` is > 0
         past_key_values_length = mask.shape[1] - token_ids.shape[1]
@@ -883,6 +887,13 @@ def general_copy(dst: TorchTensor, dst_indices: Tuple[slice],
         dst = dst.data[dst_indices] if dst_indices else dst.data
         src = src.pin_memory()
         dst.copy_(src, non_blocking=True)
+    # @gravitino addressed (20230306)
+    elif (src.device.device_type == DeviceType.MPS or 
+          dst.device.device_type == DeviceType.MPS):
+        # Workaround for the PyTorch MPS bug of the non-blocking processing of copy()
+        src = src.data[src_indices] if src_indices else src.data
+        dst = dst.data[dst_indices] if dst_indices else dst.data
+        dst.copy_(src, non_blocking=False)
     else:
         # The normal path
         src = src.data[src_indices] if src_indices else src.data
